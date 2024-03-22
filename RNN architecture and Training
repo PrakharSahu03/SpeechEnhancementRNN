@@ -1,0 +1,120 @@
+clc, clearvars
+% Load MP3 file
+[y, Fs] = audioread('shortaudio.mp3');
+
+% Generate Gaussian noise with the same length as the audio
+noise = 0.005 * randn(size(y));
+
+% Add noise to the original signal
+noisy_signal = y + noise;
+
+% Define RNN architecture
+layers = [
+    sequenceInputLayer(1)  % Input layer for sequences with one feature
+    lstmLayer(100)          % LSTM layer with 100 units
+    fullyConnectedLayer(1)  % Fully connected layer with one output
+    regressionLayer];       % Regression layer for training
+
+% Prepare data for training
+X = noisy_signal;
+Y = y;
+
+% Define sequence length and create sequences
+sequenceLength = 100;
+numSequences = floor(length(X) / sequenceLength);
+XSeq = cell(numSequences, 1);
+YSeq = cell(numSequences, 1);
+
+for i = 1:numSequences
+    startIndex = (i-1) * sequenceLength + 1;
+    endIndex = min(i * sequenceLength, length(X));
+    XSeq{i} = X(startIndex:endIndex);
+    YSeq{i} = Y(startIndex:endIndex);
+end
+
+% Convert data to cell array of sequences
+XSeq = XSeq.';
+YSeq = YSeq.';
+
+% Define training options
+options = trainingOptions('adam', ...
+    'MaxEpochs', 10, ...
+    'MiniBatchSize', 64, ...
+    'Plots', 'training-progress');
+
+% Train the RNN model
+net = trainNetwork(XSeq, YSeq, layers, options);
+
+% Denoise the audio using the trained model
+denoised_signal = predict(net, XSeq);
+
+% Extract denoised signals from cell array and concatenate
+denoised_signal_concatenated = cell2mat(denoised_signal.');
+
+% Pad denoised signal with zeros if shorter than original signal
+if length(denoised_signal_concatenated) < length(y)
+    denoised_signal_concatenated = [denoised_signal_concatenated, zeros(1, length(y) - length(denoised_signal_concatenated))];
+end
+
+
+
+% Trim or pad the denoised signal to match the length of the original signal
+minLength = min(length(y), length(denoised_signal_concatenated));
+y_trimmed = y(1:minLength);
+denoised_signal_trimmed = denoised_signal_concatenated(1:minLength);
+
+% Convert both signals to double precision
+y_double = double(y_trimmed);
+denoised_signal_double = double(denoised_signal_trimmed);
+
+% Calculate the Mean Squared Error (MSE)
+%mse = immse(y_double, denoised_signal_double);
+
+% Calculate the Mean Squared Error (MSE)
+mse = mean((y_double - denoised_signal_double).^2);
+
+% Calculate the Power of Signal (sum of squares of original signal)
+power_signal = sum(y_double.^2);
+
+% Calculate the Power of Noise (sum of squares of error)
+error = y_double - denoised_signal_double;
+power_noise = sum(error.^2);
+
+% Calculate the Signal-to-Noise Ratio (SNR) in dB
+snr = 10 * log10(power_signal / power_noise);
+
+% Display the MSE and SNR
+fprintf('Mean Squared Error (MSE) between original and denoised audio: %.4f\n', mse);
+fprintf('Signal-to-Noise Ratio (SNR) of denoised audio: %.2f dB\n', snr);
+
+% Plot the original and denoised signals
+t = (0:length(y_trimmed)-1) / Fs;
+subplot(3,1,1);
+plot(t, y_trimmed);
+title('Original Signal');
+xlabel('Time (s)');
+ylabel('Amplitude');
+
+subplot(3,1,2);
+plot(t, denoised_signal_trimmed);
+title('Denoised Signal');
+xlabel('Time (s)');
+ylabel('Amplitude');
+
+subplot(3,1,3);
+plot(t, error);
+title('Error between Original and Denoised Signal');
+xlabel('Time (s)');
+ylabel('Amplitude');
+
+% Play denoised audio
+sound(denoised_signal_double, Fs);
+
+% Plot a graph between MSE and SNR
+figure;
+plot(mse, snr, 'o');
+title('MSE vs. SNR');
+xlabel('Mean Squared Error (MSE)');
+ylabel('Signal-to-Noise Ratio (SNR) (dB)');
+grid on;
+ 
